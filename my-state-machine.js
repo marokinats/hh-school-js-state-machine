@@ -1,4 +1,5 @@
 const ht = new HashTable();
+
 let hashKey;
 
 class StateMachine {
