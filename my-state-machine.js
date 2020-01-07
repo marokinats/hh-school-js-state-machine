@@ -14,8 +14,10 @@ class StateMachine {
     if (onTransaction.service) {
       this.stateAction(onTransaction.service, event);
     } else {
+      contextStore.push({ machine: this });
       const [state, setState] = useState();
-      setState();
+      setState(onTransaction.target);
+      contextStore.pop();
     }
   }
 
@@ -27,7 +29,22 @@ class StateMachine {
       contextStore.pop();
     }
     else if (typeof toDoAction === 'string') {
-      this.machineParams.actions[toDoAction]();
+
+      try {
+        this.machineParams.actions[toDoAction]();
+
+        if (!this.machineParams.actions[toDoAction]) {
+          throw new Error();
+        }
+      }
+      catch (e) {
+        if (e.name == "TypeError") {
+          console.log('нет такого action или строка передана некорректно');
+        } else {
+          console.log('Oops!');
+        }
+      }
+
     }
     else if (Array.isArray(toDoAction)) {
       toDoAction.forEach(el => {
@@ -36,7 +53,10 @@ class StateMachine {
     }
     else if (typeof toDoAction === 'object') {
       for (const key in toDoAction) {
-        this.stateAction(toDoAction[key], event);
+        if (key != 'on') {
+          this.stateAction(toDoAction[key], event);
+        }
+
       }
     }
   }
@@ -65,20 +85,13 @@ function useState() {
 
   setState = (newState) => {
     let OnExitAction = machine.states[machine.initialState].onExit;
-    
+
     if (OnExitAction) {
       machine.stateAction(OnExitAction);
     }
 
     if (newState) {
       machine.initialState = newState;
-    }
-    else {
-      for (const key in machine.states) {
-        if (key != machine.initialState) {
-          machine.initialState = machine.states[key];
-        }
-      }
     }
 
     machine.stateAction(machine.states[machine.initialState]);
@@ -120,6 +133,11 @@ const vacancyMachine = machine({
   states: {
     responded: {
       onEntry: 'onStateEntry',
+      on: {
+        RESET: {
+          target: 'notResponded',
+        },
+      },
     },
     notResponded: {
       onExit() {
@@ -134,8 +152,8 @@ const vacancyMachine = machine({
               negotiationsMachine.transition('MAKE_LETTER', { letter: event.letter });
             }
             // window.fetch({ method: 'post', data: { resume: event.resume, vacancyId: context.id } }).then(() => {
-              setState('responded');
-              setContext({ completed: true }); // {id: 123, comleted: true}
+            setState('responded');
+            setContext({ completed: true }); // {id: 123, comleted: true}
             // });
           },
         },
@@ -159,3 +177,9 @@ vacancyMachine.transition('RESPOND', {
 });
 console.log(vacancyMachine);
 console.log(negotiationsMachine);
+
+setTimeout(() => {
+  vacancyMachine.transition('RESET'); // переведет state обратно в notResponded
+  console.log(vacancyMachine);
+}, 100);
+
