@@ -1,137 +1,86 @@
-const ht = new HashTable();
-
-let hashKey;
+let contextStore = [];
 
 class StateMachine {
 
   constructor(machineParams) {
-    this.context = machineParams.context;
-    this.context.id = machineParams.context.id;
+    this.machineParams = machineParams;
     this.states = machineParams.states;
-    this.actions = machineParams.actions;
     this.initialState = machineParams.initialState;
   }
 
   transition(transaction, event) {
+    const onTransaction = this.states[this.initialState].on[transaction];
 
-    let currentState = this.states[this.initialState];
-
-    this.stateAction(currentState, transaction, event);
-
-  }
-
-  stateAction(state, transaction, event) {
-
-    for (const key in state) {
-
-      if (typeof state[key] === 'function') {
-        state[key]();
-      }
-      else if (typeof state[key] === 'string') {
-        this.actions[state[key]]();
-      }
-      else if (Array.isArray(state[key])) {
-        state[key].forEach(el => {
-          this.actions[el]();
-        });
-      }
-
-      if (state[key].hasOwnProperty(transaction)) {
-        ht.setElement(String(this.context.id), this);
-        hashKey = String(this.context.id);
-       
-        this.stateTransaction(event, state[key][transaction]);
-      }
-    }
-  }
-
-  stateTransaction(event, transaction) {
-    if (transaction.service) {
-      transaction.service(event);
+    if (onTransaction.service) {
+      this.stateAction(onTransaction.service, event);
     } else {
       const [state, setState] = useState();
-      setState('responded');
+      setState();
     }
   }
 
-}
+  stateAction(toDoAction, event = null) {
 
-function HashTable(size = 13) {
-  const _store = [];
-  const _size = size;
-
-  function hash(string) {
-    let index = 0;
-
-    for (let i = 0; i < string.length; i++) {
-      index += string.charCodeAt(i) * (i + 1);
+    if (typeof toDoAction === 'function') {
+      contextStore.push({ machine: this });
+      toDoAction(event);
+      contextStore.pop();
     }
-
-    return index % _size;
-  }
-
-  function findMatchingIndex(list, key) {
-    for (let i = 0; i < list.length; i++) {
-      if (list[i][0] === key) return i;
+    else if (typeof toDoAction === 'string') {
+      this.machineParams.actions[toDoAction]();
     }
-  }
-
-  return {
-    _store,
-
-    setElement(key, value) {
-      const index = hash(key);
-
-      if (!_store[index]) {
-        _store[index] = [
-          [key, value]
-        ];
-      }
-      else {
-        const list = _store[index];
-        const matchingIndex = findMatchingIndex(list, key);
-
-        if (matchingIndex) {
-          list[matchingIndex] = [key, value];
-
-          return;
-        }
-
-        list.push([key, value]);
-      }
-    },
-
-    getElement(key) {
-      const index = hash(key);
-
-      if (_store[index]) {
-        const list = _store[index];
-        const matchingIndex = findMatchingIndex(list, key);
-
-        if (matchingIndex != undefined) return list[matchingIndex][1];
+    else if (Array.isArray(toDoAction)) {
+      toDoAction.forEach(el => {
+        this.actions[el]();
+      });
+    }
+    else if (typeof toDoAction === 'object') {
+      for (const key in toDoAction) {
+        this.stateAction(toDoAction[key], event);
       }
     }
   }
 }
+
 
 function useContext() {
-  const machine = ht.getElement(hashKey);
-  let currentContext = machine.context;
+  const [machine] = [contextStore[contextStore.length - 1].machine];
+
+  let currentContext = machine.machineParams.context;
 
   setContext = (newContext) => {
-    for (const key in newContext) {
-      currentContext[key] = newContext[key];
+    if (newContext) {
+      for (const key in newContext) {
+        currentContext[key] = newContext[key];
+      }
     }
+
   }
 
   return [currentContext, setContext];
 };
 
 function useState() {
-  const machine = ht.getElement(hashKey);
+  const [machine] = [contextStore[contextStore.length - 1].machine];
 
   setState = (newState) => {
-    machine.initialState = newState;
+    let OnExitAction = machine.states[machine.initialState].onExit;
+    
+    if (OnExitAction) {
+      machine.stateAction(OnExitAction);
+    }
+
+    if (newState) {
+      machine.initialState = newState;
+    }
+    else {
+      for (const key in machine.states) {
+        if (key != machine.initialState) {
+          machine.initialState = machine.states[key];
+        }
+      }
+    }
+
     machine.stateAction(machine.states[machine.initialState]);
   }
 
@@ -144,65 +93,69 @@ const machine = function (machineParams) {
 };
 
 
-// machine — создает инстанс state machine (фабрика)
-const vacancyMachine = machine({
-  // У каждого может быть свой id
-  id: 'vacancy',
-  // начальное состояние
-  initialState: 'notResponded',
-  // дополнительный контекст (payload)
-  context: { id: 123 },
-  // Граф состояний и переходов между ними
+const negotiationsMachine = machine({
+  initialState: 'none',
+  context: {},
   states: {
-    // Каждое поле — это возможное состоение
+    letter: {},
+    none: {
+      on: {
+        MAKE_LETTER: {
+          service(event) {
+            const [, setContext] = useContext();
+            const [, setState] = useState();
+            setState('letter');
+            setContext({ letter: event.letter }); // {letter: 'Возмите меня на работу, рекомендации предоставляю по запросу'}
+          },
+        },
+      },
+    },
+  },
+});
+
+const vacancyMachine = machine({
+  id: 'vacancy',
+  initialState: 'notResponded',
+  context: { id: 123 },
+  states: {
     responded: {
-      // action, который нужно выполнить при входе в это состояние. Можно задавать массивом, строкой или функцией
-      onEntry: 'onStateEntry'
+      onEntry: 'onStateEntry',
     },
     notResponded: {
-      // action, который нужно выполнить при выходе из этого состояния. Можно задавать массивом, строкой или функцией                         
       onExit() {
         console.log('we are leaving notResponded state');
       },
-      // Блок описания транзакций
       on: {
-        // Транзакция
         RESPOND: {
-          // упрощенный сервис, вызываем при транзакции
-          service: (event) => {
-            // Позволяет получить текущий контекст и изменить его
-            const [context, setContext] = useContext();
-            // Позволяет получить текущий стейт и изменить его
-            const [state, setState] = useState();
-            // Поддерживаются асинхронные действия
+          service: event => {
+            const [, setContext] = useContext();
+            const [, setState] = useState();
+            if (event.letter) {
+              negotiationsMachine.transition('MAKE_LETTER', { letter: event.letter });
+            }
             // window.fetch({ method: 'post', data: { resume: event.resume, vacancyId: context.id } }).then(() => {
-            // меняем состояние
-            setState('responded');
-            // Мержим контекст
-            setContext({ completed: true }); // {id: 123, comleted: true}
+              setState('responded');
+              setContext({ completed: true }); // {id: 123, comleted: true}
             // });
-          }
-          // Если не задан сервис, то просто переводим в заданный target, иначе выполняем сервис.
-          // target: 'responded',
-        }
-      }
+          },
+        },
+      },
     },
   },
-  // Раздел описание экшенов 
   actions: {
-    onStateEntry: (event) => {
+    onStateEntry(event) {
       const [state] = useState();
       console.log('now state is ' + state);
-    }
-		/*makeResponse: (event) => {
-			// both sync and async actions
-			const [contex, setContext] = useContext()			
-			window.fetch({method: 'post', data: {resume: event.resume, vacancyId: context.id} })
-		}*/
-  }
-})
+    },
+  },
+});
 
 // Пример использования StateMachine
+console.log(negotiationsMachine);
 console.log(vacancyMachine);
-vacancyMachine.transition('RESPOND', { resume: { name: 'Vasya', lastName: 'Pupkin' } });
+vacancyMachine.transition('RESPOND', {
+  resume: { name: 'Vasya', lastName: 'Pupkin' },
+  letter: 'Возмите меня на работу, рекомендации предоставляю по запросу',
+});
 console.log(vacancyMachine);
+console.log(negotiationsMachine);
